@@ -1,0 +1,27 @@
+# Regra geral: nao versiona JSON (credenciais, config local), exceto os
+# arquivos de exemplo/sample e os arquivos de projeto (package.json etc.).
+*.json
+!*.example.json
+!consumer/samples/*.json
+!orders-api/*.json
+!orders-web/*.json
+
+.idea/
+*.iml
+
+# consumer (Java)
+consumer/target/
+
+# orders-api (Node/TS)
+orders-api/node_modules/
+orders-api/dist/
+
+# orders-web (React/TS)
+orders-web/node_modules/
+orders-web/dist/
+
+//run.sh
+
+run.sh
+./run.sh
+orders-web
