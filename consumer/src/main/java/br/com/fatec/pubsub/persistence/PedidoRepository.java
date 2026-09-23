@@ -7,6 +7,12 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Types;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.TreeMap;
 
 /**
  * Persiste um {@link Pedido} completo numa unica transacao.
@@ -23,7 +29,7 @@ public final class PedidoRepository {
     this.db = db;
   }
 
-  /** SQLStates de deadlock (40P01) e falha de serializacao (40001) do PostgreSQL. */
+  /** Tentativas em caso de deadlock (40P01) ou falha de serializacao (40001). */
   private static final int MAX_TENTATIVAS = 4;
 
   /**
@@ -63,9 +69,13 @@ public final class PedidoRepository {
         if (p.vendedor() != null) {
           upsertVendedor(cn, p.vendedor());
         }
-        for (Pedido.Item item : p.itens()) {
-          upsertCategoria(cn, item.categoria());
-          upsertProduto(cn, item.produto());
+        // Ordem deterministica (por id, sem repeticao) evita deadlock entre
+        // transacoes concorrentes que tocam as mesmas linhas em ordens diferentes.
+        for (Pedido.Categoria cat : categoriasOrdenadas(p)) {
+          upsertCategoria(cn, cat);
+        }
+        for (Pedido.Produto prod : produtosOrdenados(p)) {
+          upsertProduto(cn, prod);
         }
 
         long pedidoId = upsertPedido(cn, p, messageId, subscription, rawJson);
@@ -124,14 +134,42 @@ public final class PedidoRepository {
     }
   }
 
-  /** Grava a cadeia de categorias (pai antes da filha) para respeitar a FK. */
+  /**
+   * Categorias distintas do pedido (incluindo ancestrais), ordenadas por
+   * profundidade e depois por id: pai sempre antes da filha (FK) e ordem global
+   * consistente entre transacoes.
+   */
+  private static List<Pedido.Categoria> categoriasOrdenadas(Pedido p) {
+    Map<String, Pedido.Categoria> porId = new HashMap<>();
+    Map<String, Integer> profundidade = new HashMap<>();
+    for (Pedido.Item item : p.itens()) {
+      List<Pedido.Categoria> cadeia = new ArrayList<>();
+      for (Pedido.Categoria c = item.categoria(); c != null; c = c.pai()) {
+        cadeia.add(c);
+      }
+      for (int i = 0; i < cadeia.size(); i++) {
+        Pedido.Categoria c = cadeia.get(i);
+        porId.putIfAbsent(c.id(), c);
+        profundidade.merge(c.id(), cadeia.size() - 1 - i, Math::max);
+      }
+    }
+    List<Pedido.Categoria> out = new ArrayList<>(porId.values());
+    out.sort(
+        Comparator.comparing((Pedido.Categoria c) -> profundidade.get(c.id()))
+            .thenComparing(Pedido.Categoria::id));
+    return out;
+  }
+
+  private static List<Pedido.Produto> produtosOrdenados(Pedido p) {
+    Map<String, Pedido.Produto> porId = new TreeMap<>();
+    for (Pedido.Item item : p.itens()) {
+      porId.putIfAbsent(item.produto().id(), item.produto());
+    }
+    return new ArrayList<>(porId.values());
+  }
+
+  /** Grava uma categoria; o pai ja deve ter sido gravado (ver {@link #categoriasOrdenadas}). */
   private void upsertCategoria(Connection cn, Pedido.Categoria cat) throws SQLException {
-    if (cat == null) {
-      return;
-    }
-    if (cat.pai() != null) {
-      upsertCategoria(cn, cat.pai());
-    }
     String sql =
         "INSERT INTO categoria (id, nome, id_categoria_pai) VALUES (?, ?, ?) "
             + "ON CONFLICT (id) DO UPDATE SET nome = EXCLUDED.nome, "
