@@ -72,7 +72,7 @@ paths:
             maximum: 100
         - name: sort
           in: query
-          description: Campo e direção de ordenação (ex: created_at:desc)
+          description: "Campo e direção de ordenação (ex: created_at:desc)"
           schema:
             type: string
             pattern: "^[a-z_]+:(asc|desc)$"

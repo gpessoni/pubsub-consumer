@@ -1,4 +1,8 @@
 import cors from "cors";
+import fs from "fs";
+import path from "path";
+import swaggerUi from "swagger-ui-express";
+import YAML from "yaml";
 import express, { Express } from "express";
 import { Pool } from "pg";
 import { createOrdersRouter } from "./routes/orders.routes";
@@ -18,6 +22,11 @@ export function createApp(pool: Pool): Express {
   const repository = new PostgresOrderRepository(pool);
   const orderService = new OrderService(repository);
   const financialSummaryService = new FinancialSummaryService(repository);
+
+  // Documentacao OpenAPI (docs/swagger.yaml na raiz do repositorio).
+  const swaggerPath = path.resolve(__dirname, "../../docs/swagger.yaml");
+  const swaggerDoc = YAML.parse(fs.readFileSync(swaggerPath, "utf8"));
+  app.use("/docs", swaggerUi.serve, swaggerUi.setup(swaggerDoc));
 
   app.get("/health", (_req, res) => res.json({ status: "ok" }));
   app.use("/orders", createOrdersRouter(orderService, financialSummaryService));
